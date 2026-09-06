@@ -1,0 +1,14 @@
+# Build output (CMake + FetchContent deps, created by the Docker toolchain as root)
+/build/
+
+# Local working checkout of libshelbourne. The build fetches it from GitHub at
+# the SHA pinned in CMakeLists.txt, so this directory must not be committed
+# (it is a separate git repository).
+/libshelbourne/
+
+# Editor / tooling local state
+/.vscode/
+/.claude/
+
+# Stray logs
+*.log

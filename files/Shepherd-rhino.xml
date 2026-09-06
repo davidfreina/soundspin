@@ -1,0 +1,14 @@
+<ShepherdConfig>
+  <daemon name="Firewall">
+    <arg>-4i</arg>
+    <arg>eth0</arg>
+    <arg>-i</arg>
+    <arg>wlan0</arg>
+    <arg>/etc/init.d/Firewalls/update_iptables</arg>
+  </daemon>
+
+  <daemon name="NetManager"
+          recovery="reboot">
+    <arg>--autoswitching=true</arg>
+  </daemon>
+</ShepherdConfig>
