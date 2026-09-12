@@ -9,13 +9,33 @@ extern "C" {
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <sys/stat.h>
 
 #define HW static_cast<shelbourne_t*>(hw_)
 
 ShelbourneSink::ShelbourneSink() {
-    // Safety net: shepherd override should already prevent these from running,
-    // but kill anything that managed to start before us.
-    shelbourne_stop_stock_processes();
+    // Take the audio hardware away from the stock software -- but ONLY when the
+    // stock software is actually in charge.
+    //
+    // When /mnt/nv/shepherd exists, shepherdd was pointed at our own override
+    // and no stock daemon was ever started, so there is nothing to stop. Worse,
+    // stopping "stock" processes there is actively destructive: libshelbourne's
+    // list includes NetManager, which our override runs to bring up Wi-Fi, and
+    // the call also SIGSTOPs shepherdd -- our own supervisor. At boot that kills
+    // networking before Wi-Fi has associated and freezes the supervisor so it
+    // can neither restart NetManager nor honour its recovery="reboot", leaving
+    // the device unreachable until the override is removed by hand.
+    struct stat st;
+    const bool shepherd_override =
+        (stat("/mnt/nv/shepherd", &st) == 0) && S_ISDIR(st.st_mode);
+
+    if (shepherd_override) {
+        fprintf(stderr, "ShelbourneSink: shepherd override active; leaving "
+                        "supervisor and NetManager alone\n");
+    } else if (shelbourne_stock_processes_active()) {
+        fprintf(stderr, "ShelbourneSink: stock processes active, stopping them\n");
+        shelbourne_stop_stock_processes();
+    }
 
     hw_ = shelbourne_init();  // ~4s: codec init + amp stabilize
     if (!hw_) {

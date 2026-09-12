@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -78,22 +79,47 @@ int main(int argc, char* argv[]) {
     }
     SendspinClient::set_log_level(log_level);
 
-    // Derive a unique, persistent client_id from /etc/machine-id (systemd).
-    // Falls back to hostname.  The spec requires this to be unique per device
-    // so that servers can track group membership and de-duplicate connections.
+    // Derive a unique, persistent client_id. The spec requires this to be
+    // unique per device so servers can track group membership and de-duplicate
+    // connections; Sendspin's own guidance is to use the MAC address.
+    //
+    // The Wi-Fi MAC is the only stable hardware identity on these devices:
+    // /etc/machine-id is empty (no systemd), there is no serial number in the
+    // device tree, and the hostname is just the variant ("rhino"/"spotty") --
+    // identical across every unit of that model, so two of the same model
+    // would collide. The "Bose SoundTouch XXXXXX" name is BoseApp state in a
+    // user-editable, factory-reset-able file, not a hardware serial.
     std::string client_id;
     {
-        std::ifstream mid("/etc/machine-id");
-        std::getline(mid, client_id);
-        client_id.erase(0, client_id.find_first_not_of(" \t\r\n"));
-        client_id.erase(client_id.find_last_not_of(" \t\r\n") + 1);
+        std::ifstream mac("/sys/class/net/wlan0/address");
+        std::string line;
+        if (std::getline(mac, line)) {
+            for (char c : line) {
+                if (std::isxdigit(static_cast<unsigned char>(c)))
+                    client_id += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
     }
     if (client_id.empty()) {
         char hbuf[256] = {};
         if (gethostname(hbuf, sizeof(hbuf)) == 0 && hbuf[0] != '\0') {
             client_id = hbuf;
         } else {
-            client_id = "soundspin";
+            client_id = "unknown";
+        }
+        fprintf(stderr, "Warning: no wlan0 MAC; client_id falls back to '%s' "
+                        "(not unique across units of one model)\n", client_id.c_str());
+    }
+
+    // Model name from the hardware variant, for the server's device info.
+    std::string product_name = "SoundTouch";
+    {
+        std::ifstream v("/proc/variant");
+        std::string variant;
+        if (std::getline(v, variant)) {
+            if (variant == "rhino")       product_name = "SoundTouch 10";
+            else if (variant == "spotty") product_name = "SoundTouch 20";
+            else if (!variant.empty())    product_name = "SoundTouch (" + variant + ")";
         }
     }
 
@@ -101,9 +127,12 @@ int main(int argc, char* argv[]) {
     SendspinClientConfig client_config;
     client_config.client_id = "soundspin-" + client_id;
     client_config.name = cfg.player_name;
-    client_config.product_name = "soundspin";
-    client_config.manufacturer = "soundspin";
+    client_config.product_name = product_name;
+    client_config.manufacturer = "Bose";
     client_config.software_version = VERSION;
+    fprintf(stderr, "Identity: client_id=%s name=\"%s\" product=\"%s\"\n",
+            client_config.client_id.c_str(), client_config.name.c_str(),
+            client_config.product_name.c_str());
 
     SendspinClient client(std::move(client_config));
 

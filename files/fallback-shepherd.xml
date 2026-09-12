@@ -1,0 +1,25 @@
+<!--
+  Fallback daemon set: networking only, no soundspin.
+
+  Installed to /mnt/nv/good-shepherd.xml (deliberately OUTSIDE /mnt/nv/shepherd
+  so shepherdd does not read it as an active config). netwatch.sh copies this
+  over the live override and reboots if the network is unusable after boot,
+  which restores a reachable device without physical access.
+
+  Keep the Firewall args identical to Shepherd-soundspin.xml -- see the warning
+  there about not moving the -4i flag onto wlan0.
+-->
+<ShepherdConfig>
+  <daemon name="Firewall">
+    <arg>-4i</arg>
+    <arg>eth0</arg>
+    <arg>-i</arg>
+    <arg>wlan0</arg>
+    <arg>/etc/init.d/Firewalls/update_iptables</arg>
+  </daemon>
+
+  <daemon name="NetManager"
+          recovery="reboot">
+    <arg>--autoswitching=true</arg>
+  </daemon>
+</ShepherdConfig>

@@ -60,20 +60,64 @@ To make them permanent, push libshelbourne and bump `GIT_TAG`.
 
 ## Deploying
 
-```bash
-make deploy DEVICE=<device-ip>
-```
-
-This copies the binary to `/tmp/` on the device. Note that `/tmp` is a tmpfs and
-is **wiped on reboot** — for a permanent install, place the binary and config on
-persistent storage and start it from the shepherd override (see
-libshelbourne's `docs/autoboot.md`).
-
 SSH to these devices needs legacy algorithms:
 
 ```bash
 ssh -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa root@<device-ip>
 ```
+
+### Temporary (for testing)
+
+```bash
+make deploy DEVICE=<device-ip>
+```
+
+Copies the binary to `/tmp/`, which is a tmpfs and is **wiped on reboot**. Run
+it by hand with `./soundspin -c soundspin.conf`.
+
+### Permanent (auto-boot)
+
+```bash
+make install DEVICE=<device-ip>
+ssh ... root@<device-ip> reboot
+```
+
+This puts the binary and config on NAND (`/mnt/nv/`) and installs a shepherd
+override so the device's own supervisor starts soundspin at boot and restarts it
+if it crashes. **The stock Bose software no longer runs** — soundspin owns the
+audio hardware.
+
+The config is only seeded if `/mnt/nv/soundspin.conf` does not already exist, so
+re-installing never clobbers your settings. On a first install, edit
+`server_url` before rebooting.
+
+Revert to stock at any time:
+
+```bash
+make uninstall DEVICE=<device-ip>
+ssh ... root@<device-ip> reboot
+```
+
+### Safety net
+
+`make install` also installs `files/netwatch.sh` as a shepherd daemon. Two
+minutes after boot it pings the default gateway; if the network is unreachable
+it restores a networking-only fallback config and reboots. Without this, a build
+that breaks networking at boot leaves the device reachable only via physical
+access (USB gadget, serial console, or factory reset).
+
+Two hazards this deployment is built around — both cost real debugging time:
+
+- **`shelbourne_stop_stock_processes()` must not run under the override.** Its
+  list includes `NetManager`, which the override itself runs, and it also
+  SIGSTOPs `shepherdd`. At boot that kills networking before Wi-Fi associates
+  and freezes the supervisor so it can neither restart NetManager nor honour
+  `recovery="reboot"`. The sink therefore skips it when `/mnt/nv/shepherd`
+  exists.
+- **Do not "fix" the Firewall args to match rhino's stock config.** Stock rhino
+  uses `-4i wlan0`; applying that ruleset to the live wireless interface locks
+  the device off the network completely. Keep `-4i eth0 -i wlan0` (rhino has no
+  `eth0`, so wlan0 stays reachable).
 
 ## Configuration
 
@@ -92,11 +136,37 @@ Run it with:
 ./soundspin -c soundspin.conf
 ```
 
-SoundSpin takes over the audio hardware, so it stops the stock Bose processes
-(`BoseApp`, `APServer`, …) and freezes the `shepherdd` supervisor while running.
+When run by hand on a stock device, SoundSpin takes over the audio hardware by
+stopping the stock Bose processes (`BoseApp`, `APServer`, …) and freezing the
+`shepherdd` supervisor for as long as it runs. Under the auto-boot override
+those processes never start, so nothing needs stopping.
 
-`files/` contains shepherd overrides that stop those processes from starting at
-boot in the first place.
+### Identity
+
+Each player identifies itself to the server with a `client_id` derived from the
+Wi-Fi MAC address, e.g. `soundspin-a81b6a65b244`. That is the only stable
+hardware identity on these devices: there is no `machine-id` (no systemd), no
+serial number in the device tree, and the hostname is just the model variant
+(`rhino`/`spotty`), which would collide between two units of the same model.
+The "Bose SoundTouch XXXXXX" name shown over SSH is BoseApp state in a
+user-editable, factory-reset-able file, not a hardware serial.
+
+`player_name` is sent on every connection, but Music Assistant stores a
+player's name when it first sees a `client_id` and does not rename it on later
+connections. To change the name, rename the player in Music Assistant — or
+remove it there and let it re-register.
+
+The device info reports manufacturer `Bose` and the model (`SoundTouch 10` /
+`SoundTouch 20`) from `/proc/variant`.
+
+### Encryption
+
+Music Assistant may warn that the player is *"connected without encryption
+(legacy mode). Pairing not available."* This is expected: no release of
+[sendspin-cpp](https://github.com/Sendspin/sendspin-cpp) (through v0.7.2 at the
+time of writing) implements the encrypted/paired transport, so it is not
+something SoundSpin can enable. Playback is unaffected; the connection is plain
+WebSocket on your LAN.
 
 ## Notes on the hardware
 

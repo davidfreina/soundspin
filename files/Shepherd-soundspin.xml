@@ -1,0 +1,46 @@
+<!--
+  Shepherd auto-boot override: run soundspin instead of the stock Bose software.
+
+  Installed to /mnt/nv/shepherd/ by `make install`. When that directory exists,
+  /etc/init.d/SoundTouch points shepherdd at it INSTEAD of /opt/Bose/etc, so
+  this file is the COMPLETE daemon set -- nothing stock is inherited. shepherdd
+  reads every Shepherd-*.xml in the directory, so the filename need not match
+  /proc/variant; one file serves both rhino and spotty.
+
+  FIREWALL ARGS -- DO NOT "FIX" TO MATCH STOCK.
+  spotty's stock config uses exactly these args. rhino's stock config uses
+  "-4i wlan0" instead, but applying that ruleset to the live wireless interface
+  locks the device off the network entirely: no SSH, no ICMP, no ARP. Keeping
+  the -4i flag on eth0 (which rhino does not have) leaves wlan0 reachable.
+  Recovering from that requires physical access, so leave this alone.
+
+  soundspin has no recovery="reboot": shepherdd restarts a plain daemon on
+  crash, whereas recovery="reboot" turns a crash loop into a boot loop that
+  only a factory reset clears. Daemon names must be absolute paths -- shepherdd
+  uses execv(), not execvp(), so it does not search PATH.
+
+  netwatch.sh is a boot safety net: if the network is unusable ~2 minutes after
+  boot it restores /mnt/nv/good-shepherd.xml (this set minus soundspin) and
+  reboots, so a bad build cannot lock you out of the device.
+-->
+<ShepherdConfig>
+  <daemon name="Firewall">
+    <arg>-4i</arg>
+    <arg>eth0</arg>
+    <arg>-i</arg>
+    <arg>wlan0</arg>
+    <arg>/etc/init.d/Firewalls/update_iptables</arg>
+  </daemon>
+
+  <daemon name="NetManager"
+          recovery="reboot">
+    <arg>--autoswitching=true</arg>
+  </daemon>
+
+  <daemon name="/mnt/nv/soundspin">
+    <arg>-c</arg>
+    <arg>/mnt/nv/soundspin.conf</arg>
+  </daemon>
+
+  <daemon name="/mnt/nv/netwatch.sh"/>
+</ShepherdConfig>
