@@ -34,7 +34,16 @@ bool load_config(const std::string& path, Config& config) {
         }
 
         std::string key = trim(line.substr(0, eq));
-        std::string value = trim(line.substr(eq + 1));
+        std::string value = line.substr(eq + 1);
+        // Allow trailing comments ("key = value   # note"). A '#' only starts a
+        // comment when preceded by whitespace, so values like URLs are safe.
+        for (size_t i = 1; i < value.size(); ++i) {
+            if (value[i] == '#' && (value[i - 1] == ' ' || value[i - 1] == '\t')) {
+                value.resize(i);
+                break;
+            }
+        }
+        value = trim(value);
 
         if (key == "server_url") {
             config.server_url = value;
@@ -42,6 +51,25 @@ bool load_config(const std::string& path, Config& config) {
             config.player_name = value;
         } else if (key == "log_level") {
             config.log_level = value;
+        } else if (key == "log_file") {
+            config.log_file = value;
+        } else if (key == "volume_step") {
+            try {
+                int v = std::stoi(value);
+                if (v < 1 || v > 25) {
+                    fprintf(stderr, "%s:%d: volume_step must be 1-25, ignoring\n",
+                            path.c_str(), line_num);
+                } else {
+                    config.volume_step = v;
+                }
+            } catch (const std::exception&) {
+                fprintf(stderr, "%s:%d: invalid volume_step value '%s', ignoring\n",
+                        path.c_str(), line_num, value.c_str());
+            }
+        } else if (key == "firewall_allow") {
+            // Read by /mnt/nv/firewall.sh, not by soundspin.
+        } else if (key.rfind("button_", 0) == 0) {
+            config.buttons[key.substr(7)] = value;
         } else if (key == "initial_volume") {
             try {
                 int v = std::stoi(value);

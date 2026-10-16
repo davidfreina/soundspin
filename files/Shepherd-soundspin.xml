@@ -7,12 +7,12 @@
   reads every Shepherd-*.xml in the directory, so the filename need not match
   /proc/variant; one file serves both rhino and spotty.
 
-  FIREWALL ARGS -- DO NOT "FIX" TO MATCH STOCK.
-  spotty's stock config uses exactly these args. rhino's stock config uses
-  "-4i wlan0" instead, but applying that ruleset to the live wireless interface
-  locks the device off the network entirely: no SSH, no ICMP, no ARP. Keeping
-  the -4i flag on eth0 (which rhino does not have) leaves wlan0 reachable.
-  Recovering from that requires physical access, so leave this alone.
+  FIREWALL. This is a template: `make install` replaces FIREWALL_INTERFACES
+  with the network interfaces the device actually has (eth0 and/or wlan0),
+  because the Firewall daemon exits if told to watch one that does not exist --
+  and shepherdd then restarts it in a tight loop (rhino has no eth0). The rules
+  come from /mnt/nv/firewall.sh: Bose's stock rules (own subnet only) plus the
+  `firewall_allow` subnets from soundspin.conf.
 
   soundspin has no recovery="reboot": shepherdd restarts a plain daemon on
   crash, whereas recovery="reboot" turns a crash loop into a boot loop that
@@ -25,11 +25,8 @@
 -->
 <ShepherdConfig>
   <daemon name="Firewall">
-    <arg>-4i</arg>
-    <arg>eth0</arg>
-    <arg>-i</arg>
-    <arg>wlan0</arg>
-    <arg>/etc/init.d/Firewalls/update_iptables</arg>
+    <!--FIREWALL_INTERFACES-->
+    <arg>/mnt/nv/firewall.sh</arg>
   </daemon>
 
   <daemon name="NetManager"

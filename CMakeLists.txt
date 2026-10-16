@@ -26,6 +26,7 @@ add_executable(soundspin
     src/main.cpp
     src/libshelbourne_sink.cpp
     src/config.cpp
+    src/buttons.cpp
     ${libshelbourne_SOURCE_DIR}/shelbourne.c
 )
 target_link_options(soundspin PRIVATE

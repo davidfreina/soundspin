@@ -4,14 +4,17 @@
 #include "sendspin/metadata_role.h"
 
 #include "libshelbourne_sink.h"
+#include "buttons.h"
 #include "config.h"
 
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <getopt.h>
 #include <string>
@@ -69,6 +72,22 @@ int main(int argc, char* argv[]) {
     if (cfg.server_url.empty()) {
         fprintf(stderr, "Error: server_url is required in %s\n", config_path.c_str());
         return 1;
+    }
+
+    // Optional log file. Under the shepherd auto-boot override stderr goes
+    // nowhere, so without this a running speaker's logs are invisible.
+    // Truncated on each start; keep it on tmpfs (/tmp) to spare the NAND.
+    if (!cfg.log_file.empty()) {
+        int fd = open(cfg.log_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            fprintf(stderr, "Warning: cannot open log_file %s: %s\n",
+                    cfg.log_file.c_str(), strerror(errno));
+        } else {
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+            setvbuf(stdout, nullptr, _IOLBF, 0);
+        }
     }
 
     // Apply log level
@@ -242,6 +261,84 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Initial volume set to %u\n", vol);
     }
 
+    // Hardware buttons. Volume and mute act on this player (so the speaker's
+    // own buttons change this speaker, and Music Assistant's slider follows);
+    // transport actions go to the server via the controller role and so act on
+    // the whole group.
+    const uint8_t volume_step = static_cast<uint8_t>(cfg.volume_step);
+    ButtonHandler buttons(cfg.buttons, [&](ButtonHandler::Action action, const char* key) {
+        using A = ButtonHandler::Action;
+        using C = SendspinControllerCommand;
+        const auto& cs = controller.get_controller_state();
+        auto supported = [&](C c) {
+            for (auto s : cs.supported_commands) if (s == c) return true;
+            return false;
+        };
+
+        switch (action) {
+            case A::VOLUME_UP:
+            case A::VOLUME_DOWN: {
+                int v = player.get_volume();
+                v += (action == A::VOLUME_UP) ? volume_step : -volume_step;
+                v = v < 0 ? 0 : (v > 100 ? 100 : v);
+                if (player.get_muted()) {  // touching volume un-mutes, as on most speakers
+                    audio_sink.set_muted(false);
+                    player.update_muted(false);
+                }
+                audio_sink.set_volume(static_cast<uint8_t>(v));
+                player.update_volume(static_cast<uint8_t>(v));
+                fprintf(stderr, "Buttons: %s -> volume %d\n", key, v);
+                return;
+            }
+            case A::MUTE: {
+                const bool m = !player.get_muted();
+                audio_sink.set_muted(m);
+                player.update_muted(m);
+                fprintf(stderr, "Buttons: %s -> %s\n", key, m ? "muted" : "unmuted");
+                return;
+            }
+            default:
+                break;
+        }
+
+        if (!client.is_connected()) {
+            fprintf(stderr, "Buttons: %s -> %s ignored (not connected)\n",
+                    key, ButtonHandler::action_name(action));
+            return;
+        }
+
+        C cmd;
+        switch (action) {
+            case A::PLAY_PAUSE: {
+                const auto& st = client.get_group_state().playback_state;
+                const bool playing = st.has_value() && *st == SendspinPlaybackState::PLAYING;
+                cmd = !playing ? C::PLAY : (supported(C::PAUSE) ? C::PAUSE : C::STOP);
+                break;
+            }
+            case A::PLAY:     cmd = C::PLAY; break;
+            case A::PAUSE:    cmd = C::PAUSE; break;
+            case A::STOP:     cmd = C::STOP; break;
+            case A::NEXT:     cmd = C::NEXT; break;
+            case A::PREVIOUS: cmd = C::PREVIOUS; break;
+            case A::SWITCH:   cmd = C::SWITCH; break;
+            case A::SHUFFLE:  cmd = cs.shuffle ? C::UNSHUFFLE : C::SHUFFLE; break;
+            case A::REPEAT:
+                cmd = cs.repeat == SendspinRepeatMode::OFF ? C::REPEAT_ALL
+                    : cs.repeat == SendspinRepeatMode::ALL ? C::REPEAT_ONE
+                                                           : C::REPEAT_OFF;
+                break;
+            default:
+                return;
+        }
+        if (!cs.supported_commands.empty() && !supported(cmd)) {
+            fprintf(stderr, "Buttons: %s -> %s not supported by server right now\n",
+                    key, ButtonHandler::action_name(action));
+            return;
+        }
+        fprintf(stderr, "Buttons: %s -> %s\n", key, ButtonHandler::action_name(action));
+        controller.send_command(cmd);
+    });
+
 
     using clock = std::chrono::steady_clock;
     static constexpr auto RECONNECT_INTERVAL = std::chrono::seconds(5);
@@ -249,6 +346,7 @@ int main(int argc, char* argv[]) {
 
     while (running.load()) {
         client.loop();
+        buttons.poll(audio_sink.hardware());
 
         if (!client.is_connected()) {
             auto now = clock::now();

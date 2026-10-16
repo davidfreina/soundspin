@@ -106,18 +106,60 @@ it restores a networking-only fallback config and reboots. Without this, a build
 that breaks networking at boot leaves the device reachable only via physical
 access (USB gadget, serial console, or factory reset).
 
-Two hazards this deployment is built around — both cost real debugging time:
+### Firewall
 
-- **`shelbourne_stop_stock_processes()` must not run under the override.** Its
-  list includes `NetManager`, which the override itself runs, and it also
-  SIGSTOPs `shepherdd`. At boot that kills networking before Wi-Fi associates
-  and freezes the supervisor so it can neither restart NetManager nor honour
-  `recovery="reboot"`. The sink therefore skips it when `/mnt/nv/shepherd`
-  exists.
-- **Do not "fix" the Firewall args to match rhino's stock config.** Stock rhino
-  uses `-4i wlan0`; applying that ruleset to the live wireless interface locks
-  the device off the network completely. Keep `-4i eth0 -i wlan0` (rhino has no
-  `eth0`, so wlan0 stays reachable).
+The override runs Bose's own firewall: inbound connections are accepted only
+from the speaker's own subnet (replies to its outbound connections, e.g. to
+Music Assistant, always get through). Since SSH on these devices is
+**passwordless root**, keep it on.
+
+If you manage the speakers from another subnet or VLAN, allow it explicitly in
+`soundspin.conf`:
+
+```ini
+firewall_allow = 10.0.20.0/24 192.168.88.0/23
+```
+
+`files/firewall.sh` applies Bose's rules unchanged and then accepts these
+subnets. `make install` fills in the interfaces the device actually has
+(`eth0` and/or `wlan0`): the Firewall daemon exits if told to watch a missing
+interface, and shepherdd then restarts it in a tight loop — on a SoundTouch 10,
+which has no `eth0`, that loop alone used most of the CPU.
+
+### Hazard: never stop "stock" processes under the override
+
+`shelbourne_stop_stock_processes()` must not run under the override. Its list
+includes `NetManager`, which the override itself runs, and it also SIGSTOPs
+`shepherdd`. At boot that kills networking before Wi-Fi associates and freezes
+the supervisor so it can neither restart NetManager nor honour
+`recovery="reboot"`, leaving the device unreachable. The sink therefore skips it
+when `/mnt/nv/shepherd` exists.
+
+### Changing the Wi-Fi network
+
+NetManager keeps its networks in
+`/mnt/nv/BoseApp-Persistence/1/NetworkProfiles.xml`. Add one over SSH while the
+speaker is still on the current network:
+
+```sh
+cd /mnt/nv/BoseApp-Persistence/1
+cp NetworkProfiles.xml NetworkProfiles.xml.bak
+sed -i 's|</WiFiProfiles>|<profile SSID="NEW_SSID" security="wpa_or_wpa2" passphrase="NEW_PASSWORD" /></WiFiProfiles>|' NetworkProfiles.xml
+sync; reboot
+```
+
+NetManager encrypts the passphrase itself on the next boot. It also
+**rewrites the `priority` values** and, with `--autoswitching`, moves to whichever
+known network it rates best (5 GHz beat 2.4 GHz on the same access point in
+testing). So to force a network, delete the other profiles rather than editing
+priorities.
+
+Bose's offline path also works under the override: a FAT32 stick with
+`network.txt` (SSID on line 1, passphrase on line 2) in the rear SERVICE
+micro-USB port. It **replaces** all known networks and reboots.
+
+If the new network is a different subnet, check `server_url` still routes to
+Music Assistant and that your management subnet is in `firewall_allow`.
 
 ## Configuration
 
@@ -130,6 +172,8 @@ log_level      = info      # none, error, warn, info, debug, verbose
 initial_volume = 10        # 0-100
 ```
 
+Trailing `# comments` are allowed after a value.
+
 Run it with:
 
 ```bash
@@ -140,6 +184,55 @@ When run by hand on a stock device, SoundSpin takes over the audio hardware by
 stopping the stock Bose processes (`BoseApp`, `APServer`, …) and freezing the
 `shepherdd` supervisor for as long as it runs. Under the auto-boot override
 those processes never start, so nothing needs stopping.
+
+### Buttons
+
+The speaker's own buttons work. Every key is configurable with a short-press
+and an optional long-press action:
+
+```ini
+button_power      = play_pause   # short press
+button_power_long = next         # held >= 0.8 s
+button_preset_6   = stop
+volume_step       = 5            # 1-25
+```
+
+Keys: `volume_up`, `volume_down`, `power`, `aux`, `preset_1` … `preset_6`.
+
+Actions: `volume_up`, `volume_down`, `mute` (toggle), `play_pause` (toggle),
+`play`, `pause`, `stop`, `next`, `previous`, `shuffle` (toggle), `repeat`
+(cycles off → all → one), `switch`, `none`.
+
+| Key | Default |
+|---|---|
+| Vol + / Vol − | `volume_up` / `volume_down` (auto-repeat while held) |
+| Power | `play_pause` |
+| AUX | `mute` |
+| Preset 1 / 2 / 3 | `previous` / `play_pause` / `next` |
+| Preset 4 / 5 | `shuffle` / `repeat` |
+| Preset 6 | `none` |
+
+Volume and mute act on **this speaker** (Music Assistant's slider follows);
+transport actions are sent to the server and act on the **whole group**.
+
+A key without a long-press action fires the moment it is pressed. A key *with*
+one fires its short action on release instead, since it can't know earlier
+whether you'll keep holding — and volume keys stop auto-repeating.
+
+Presets cannot start a favourite playlist or station: Sendspin's controller
+commands are transport-only, with no way to select content.
+
+### Logging
+
+Under auto-boot the daemon's output is otherwise invisible, because shepherdd
+discards it. Set a log file to see it:
+
+```ini
+log_file = /tmp/soundspin.log   # truncated on each start; keep it on tmpfs
+```
+
+Every button press is logged, which also makes it easy to check the key mapping
+on a model that hasn't been tested yet.
 
 ### Identity
 

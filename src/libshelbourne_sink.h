@@ -11,13 +11,15 @@
 #include <thread>
 #include <vector>
 
+struct shelbourne;  // libshelbourne handle (opaque)
+
 /// Audio sink that writes to the Bose SoundTouch snd_shelby DMA via
 /// libshelbourne. Drop-in replacement for AlsaPipeSink — same ring-buffered
 /// producer/consumer split, same listener API.
 ///
-/// Hardware is fixed at 48 kHz / 32-bit / stereo. Input PCM may be 16, 24 or
-/// 32 bit at 48 kHz stereo; other formats are rejected at configure() time.
-/// Advertise only 48 kHz formats in the Sendspin player config.
+/// Hardware is fixed at HW_SAMPLE_RATE (46875 Hz) / 32-bit / stereo. Input PCM
+/// may be 16, 24 or 32 bit stereo at that rate; other formats are rejected at
+/// configure() time. Advertise only HW_SAMPLE_RATE formats to the server.
 class ShelbourneSink {
   public:
     /// Approximate hardware pipeline delay (DMA + codec + amp).
@@ -52,6 +54,11 @@ class ShelbourneSink {
     void set_device(const std::string& device);  // no-op (API compat)
 
     std::function<void(uint32_t frames, int64_t timestamp)> on_frames_played;
+
+    /// libshelbourne handle, for other subsystems on the same device (keypad).
+    /// nullptr if hardware init failed. Keypad polling is safe to interleave
+    /// with the playback thread's audio writes (separate fd).
+    struct shelbourne* hardware() const { return static_cast<struct shelbourne*>(hw_); }
 
   private:
     void* hw_{nullptr};  // shelbourne_t*

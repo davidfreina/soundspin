@@ -6,16 +6,13 @@
   over the live override and reboots if the network is unusable after boot,
   which restores a reachable device without physical access.
 
-  Keep the Firewall args identical to Shepherd-soundspin.xml -- see the warning
-  there about not moving the -4i flag onto wlan0.
+  Like Shepherd-soundspin.xml this is a template; see there for the Firewall
+  interface placeholder and rules.
 -->
 <ShepherdConfig>
   <daemon name="Firewall">
-    <arg>-4i</arg>
-    <arg>eth0</arg>
-    <arg>-i</arg>
-    <arg>wlan0</arg>
-    <arg>/etc/init.d/Firewalls/update_iptables</arg>
+    <!--FIREWALL_INTERFACES-->
+    <arg>/mnt/nv/firewall.sh</arg>
   </daemon>
 
   <daemon name="NetManager"
