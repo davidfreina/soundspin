@@ -48,6 +48,49 @@ static void print_usage(const char* prog) {
     fprintf(stderr, "  -V        Show version\n");
 }
 
+static const char* repeat_name(SendspinRepeatMode r) {
+    switch (r) {
+        case SendspinRepeatMode::OFF: return "off";
+        case SendspinRepeatMode::ONE: return "one";
+        case SendspinRepeatMode::ALL: return "all";
+    }
+    return "?";
+}
+
+static const char* command_name(SendspinControllerCommand c) {
+    switch (c) {
+        case SendspinControllerCommand::PLAY: return "PLAY";
+        case SendspinControllerCommand::PAUSE: return "PAUSE";
+        case SendspinControllerCommand::STOP: return "STOP";
+        case SendspinControllerCommand::NEXT: return "NEXT";
+        case SendspinControllerCommand::PREVIOUS: return "PREVIOUS";
+        case SendspinControllerCommand::VOLUME: return "VOLUME";
+        case SendspinControllerCommand::MUTE: return "MUTE";
+        case SendspinControllerCommand::REPEAT_OFF: return "REPEAT_OFF";
+        case SendspinControllerCommand::REPEAT_ONE: return "REPEAT_ONE";
+        case SendspinControllerCommand::REPEAT_ALL: return "REPEAT_ALL";
+        case SendspinControllerCommand::SHUFFLE: return "SHUFFLE";
+        case SendspinControllerCommand::UNSHUFFLE: return "UNSHUFFLE";
+        case SendspinControllerCommand::SWITCH: return "SWITCH";
+    }
+    return "?";
+}
+
+// Logs server-reported repeat/shuffle changes, so button behaviour can be
+// checked against what the server actually believes.
+struct LoggingControllerListener : ControllerRoleListener {
+    bool have = false;
+    SendspinRepeatMode repeat{};
+    bool shuffle{};
+    void on_controller_state(const ServerStateControllerObject& st) override {
+        if (have && st.repeat == repeat && st.shuffle == shuffle) return;
+        fprintf(stderr, "Controller state: repeat=%s shuffle=%d\n",
+                repeat_name(st.repeat), st.shuffle ? 1 : 0);
+        have = true; repeat = st.repeat; shuffle = st.shuffle;
+    }
+    void on_controller_state_clear() override { have = false; }
+};
+
 int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -241,6 +284,9 @@ int main(int argc, char* argv[]) {
     SoundSpinClientListener client_listener;
     HostNetworkProvider network_provider;
 
+    LoggingControllerListener controller_listener;
+    controller.set_listener(&controller_listener);
+
     player.set_listener(&player_listener);
     client.set_listener(&client_listener);
     client.set_network_provider(&network_provider);
@@ -335,7 +381,13 @@ int main(int argc, char* argv[]) {
                     key, ButtonHandler::action_name(action));
             return;
         }
-        fprintf(stderr, "Buttons: %s -> %s\n", key, ButtonHandler::action_name(action));
+        if (action == A::REPEAT || action == A::SHUFFLE) {
+            fprintf(stderr, "Buttons: %s -> %s (state repeat=%s shuffle=%d, sending %s)\n",
+                    key, ButtonHandler::action_name(action), repeat_name(cs.repeat),
+                    cs.shuffle ? 1 : 0, command_name(cmd));
+        } else {
+            fprintf(stderr, "Buttons: %s -> %s\n", key, ButtonHandler::action_name(action));
+        }
         controller.send_command(cmd);
     });
 

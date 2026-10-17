@@ -194,7 +194,7 @@ and an optional long-press action:
 button_power      = play_pause   # short press
 button_power_long = next         # held >= 0.8 s
 button_preset_6   = stop
-volume_step       = 5            # 1-25
+volume_step       = 1            # 1-25
 ```
 
 Keys: `volume_up`, `volume_down`, `power`, `aux`, `preset_1` … `preset_6`.
@@ -205,7 +205,7 @@ Actions: `volume_up`, `volume_down`, `mute` (toggle), `play_pause` (toggle),
 
 | Key | Default |
 |---|---|
-| Vol + / Vol − | `volume_up` / `volume_down` (auto-repeat while held) |
+| Vol + / Vol − | `volume_up` / `volume_down`, ±1 per step (auto-repeat while held) |
 | Power | `play_pause` |
 | AUX | `mute` |
 | Preset 1 / 2 / 3 | `previous` / `play_pause` / `next` |

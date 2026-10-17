@@ -10,7 +10,7 @@ struct Config {
     std::string log_level = "info";
     std::string log_file;     // empty = stderr; otherwise stdout+stderr are redirected here
     int initial_volume = -1;  // 0-100 to override hardware volume on startup; -1 = server default
-    int volume_step = 5;      // 1-25, volume change per button press / repeat
+    int volume_step = 1;      // 1-25, volume change per button press / repeat
 
     /// Raw button bindings: "button_<key>" and "button_<key>_long" -> action name.
     /// Validated by ButtonHandler, which knows the key and action vocabulary.
